@@ -20,7 +20,7 @@ HEADERS = {
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "endpoints": ["/health", "/api/market-data"]}
+    return {"status": "online", "endpoints": ["/health", "/api/market-data", "/api/market/vix", "/api/market/wti"]}
 
 @app.get("/health")
 def health_check():
@@ -28,16 +28,31 @@ def health_check():
 
 @app.get("/api/market-data")
 async def get_market_data():
-    data = {"vix": None, "wti": None}
-    
+    vix_data = await fetch_vix()
+    wti_data = await fetch_wti()
+    return {"vix": vix_data, "wti": wti_data}
+
+@app.get("/api/market/vix")
+async def get_vix():
+    data = await fetch_vix()
+    if not data:
+        raise HTTPException(status_code=404, detail="VIX data unavailable")
+    return data
+
+@app.get("/api/market/wti")
+async def get_wti():
+    data = await fetch_wti()
+    if not data:
+        raise HTTPException(status_code=404, detail="WTI data unavailable")
+    return data
+
+async def fetch_vix():
     async with httpx.AsyncClient(headers=HEADERS, timeout=10.0, follow_redirects=True) as client:
-        # Fetch VIX via Yahoo Finance API backend
         try:
             vix_res = await client.get("https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX")
             if vix_res.status_code == 200:
-                vix_json = vix_res.json()
-                meta = vix_json["chart"]["result"][0]["meta"]
-                data["vix"] = {
+                meta = vix_res.json()["chart"]["result"][0]["meta"]
+                return {
                     "price": meta.get("regularMarketPrice"),
                     "prev": meta.get("chartPreviousClose"),
                     "source": "Yahoo API"
@@ -45,33 +60,31 @@ async def get_market_data():
         except Exception:
             pass
 
-        # Fallback to scraping CNBC for VIX if API fails
-        if not data["vix"]:
-            try:
-                cnbc_vix = await client.get("https://www.cnbc.com/quotes/.VIX")
-                soup = BeautifulSoup(cnbc_vix.text, "html.parser")
-                price_meta = soup.find("meta", {"itemprop": "price"})
-                if price_meta and price_meta.get("content"):
-                    data["vix"] = {
-                        "price": float(price_meta["content"]),
-                        "prev": None,
-                        "source": "CNBC Scrape"
-                    }
-            except Exception:
-                pass
+        try:
+            cnbc_vix = await client.get("https://www.cnbc.com/quotes/.VIX")
+            soup = BeautifulSoup(cnbc_vix.text, "html.parser")
+            price_meta = soup.find("meta", {"itemprop": "price"})
+            if price_meta and price_meta.get("content"):
+                return {
+                    "price": float(price_meta["content"]),
+                    "prev": None,
+                    "source": "CNBC Scrape"
+                }
+        except Exception:
+            pass
+    return None
 
-        # Fetch WTI Crude via Yahoo Finance API backend
+async def fetch_wti():
+    async with httpx.AsyncClient(headers=HEADERS, timeout=10.0, follow_redirects=True) as client:
         try:
             wti_res = await client.get("https://query1.finance.yahoo.com/v8/finance/chart/CL=F")
             if wti_res.status_code == 200:
-                wti_json = wti_res.json()
-                meta = wti_json["chart"]["result"][0]["meta"]
-                data["wti"] = {
+                meta = wti_res.json()["chart"]["result"][0]["meta"]
+                return {
                     "price": meta.get("regularMarketPrice"),
                     "prev": meta.get("chartPreviousClose"),
                     "source": "Yahoo API"
                 }
         except Exception:
             pass
-
-    return data
+    return None
