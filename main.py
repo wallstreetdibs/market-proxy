@@ -18,6 +18,10 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+@app.get("/")
+def read_root():
+    return {"status": "online", "endpoints": ["/health", "/api/market-data"]}
+
 @app.get("/health")
 def health_check():
     return {"status": "awake"}
